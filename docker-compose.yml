@@ -1,0 +1,23 @@
+services:
+  app:
+    build:
+      context: .
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app
+      - dev-static-data:/vol/web
+    environment:
+      DJANGO_DB_HOST: DB_HOST
+      DJANGO_DB_PORT: DB_PORT
+      DJANGO_DB_NAME: DB_NAME
+      DJANGO_DB_USER: DB_USER
+      DJANGO_DB_PASSWORD: DB_PASSWORD
+    command: > 
+      sh -c "python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8000"
+
+volumes:
+  dev-static-data:
