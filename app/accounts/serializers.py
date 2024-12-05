@@ -14,7 +14,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = get_user_model()
-        fields = ['id', 'email', 'password', 'first_name', 'last_name', 'company', 'image', 'is_creator', 'is_active', 'is_staff', 'managers']
+        fields = ['id', 'email', 'password', 'first_name', 'last_name', 'company', 'branch', 'image', 'is_creator', 'is_active', 'is_staff', 'managers']
         extra_kwargs = {'password': {'write_only': True, 'min_length': 5}}
 
     def validate(self, attrs):
@@ -65,6 +65,7 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         token['first_name'] = user.first_name 
         token['last_name'] = user.first_name 
         token['is_staff'] = user.is_staff
+        token['branch'] = user.branch
         token['is_creator'] = user.is_creator
         token['image'] = str(user.image)
         token['id'] = user.id

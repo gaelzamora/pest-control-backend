@@ -1,30 +1,20 @@
 from rest_framework import serializers
-from core.models import Register, Image
+from core.models import Register
 
 class RegisterSerializer(serializers.ModelSerializer):
     owner = serializers.StringRelatedField(read_only=True)
-    images = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
 
     class Meta:
         model = Register
-        fields = ['id', 'pest_name', 'created', 'owner', 'images']
+        fields = ['id', 'pest_name', 'created', 'owner', 'image']
         read_only_fields = ['id', 'created', 'owner']
 
     def create(self, validated_data):
         user = self.context['request'].user
         return Register.objects.create(owner=user, **validated_data)
     
-class ImageSerializer(serializers.ModelSerializer):
-    register = serializers.PrimaryKeyRelatedField(queryset=Register.objects.all())
+class RegisterImageSerializer(serializers.ModelSerializer):
+    """Serializer for uploading images to Register"""
 
-    class Meta:
-        model = Image
-        fields = ['id', 'register', 'image']
-        read_only_fields = ['id']
-
-    def validate_register(self, value):
-        user = self.context['request'].user
-        if not user.registers.filter(id=value.id).exists():
-            raise serializers.ValidationError("You can only add images to your own registers.")
-        
-        return value
+    class Meta(RegisterSerializer.Meta):
+        fields = RegisterSerializer.Meta.fields + ['image']
