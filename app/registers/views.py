@@ -12,6 +12,9 @@ from .serializers import RegisterSerializer
 from django.utils.timezone import now
 from datetime import timedelta
 from rest_framework.exceptions import ValidationError
+import datetime
+from django.db.models.functions import TruncDate
+from django.db.models import Count
 
 class PestRegisterCreateViewSet(APIView):
     permission_classes = [IsAuthenticated]
@@ -24,7 +27,6 @@ class PestRegisterCreateViewSet(APIView):
         if not pest_name:
             raise ValidationError({'pest_name': 'This field is required.'})
 
-        # Comprobar si el usuario ya ha registrado una plaga en los últimos 10 segundos
         ten_seconds_ago = now() - timedelta(seconds=10)
         recent_register = Register.objects.filter(owner=user, created__gte=ten_seconds_ago).exists()
 
@@ -33,8 +35,7 @@ class PestRegisterCreateViewSet(APIView):
                 {"message": "You can only register a pest every 10 seconds."},
                 status=status.HTTP_429_TOO_MANY_REQUESTS
             )
-
-        # Crear el registro
+        
         register = Register.objects.create(
             pest_name=pest_name,
             owner=user,
@@ -80,3 +81,83 @@ class GetRegisterDetailView(APIView):
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Register.DoesNotExist:
             return Response({'detail': 'Registro no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        
+class LastSevenDaysRegistersAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        today = datetime.datetime.today()
+        last_seven_days = today - timedelta(days=7)
+
+        if user.is_creator:
+            data = (
+                Register.objects.filter(owner__in=user.managers.all(), created__gte=last_seven_days)
+                .annotate(date=TruncDate('created'))
+                .values('date')
+                .annotate(count=Count('id'))
+                .order_by('date')
+            )
+        elif user.is_technique:
+            data = (
+                Register.objects.filter(owner__in=user.managed_by.all(), created__gte=last_seven_days)
+                .annotate(date=TruncDate('created'))
+                .values('date')
+                .annotate(count=Count('id'))
+                .order_by('date')
+            )
+        else:
+            data = (
+                Register.objects.filter(owner=user, created__gte=last_seven_days)
+                .annotate(date=TruncDate('created'))
+                .values('date')
+                .annotate(count=Count('id'))
+                .order_by('date')
+            )
+
+        return Response(data)
+
+class TechnicianRegistersAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        if not user.is_technique:
+            return Response([])  # Solo los técnicos pueden acceder
+
+        today = datetime.datetime.today()
+        last_seven_days = today - timedelta(days=7)
+
+        # Registros asociados a los dueños gestionados por los managers del técnico
+        managed_owners = user.managed_by.all()
+        manager_registers = (
+            Register.objects.filter(
+                owner__in=managed_owners,
+                created__gte=last_seven_days
+            )
+            .annotate(date=TruncDate('created'))
+            .values('date', 'owner')
+            .annotate(count=Count('id'))
+            .order_by('date')
+        )
+
+        # Registros asociados directamente al técnico (mediante solicitudes de trabajo)
+        work_requests_owners = user.received_requests.filter(status='working').values_list('owner', flat=True)
+        technician_registers = (
+            Register.objects.filter(
+                owner__in=work_requests_owners,
+                created__gte=last_seven_days
+            )
+            .annotate(date=TruncDate('created'))
+            .values('date', 'owner')
+            .annotate(count=Count('id'))
+            .order_by('date')
+        )
+
+        # Combinar datos
+        combined_data = list(manager_registers) + list(technician_registers)
+
+        for entry in combined_data:
+            entry['user_id'] = entry['owner']
+
+        return Response(combined_data)

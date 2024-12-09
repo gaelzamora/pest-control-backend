@@ -1,5 +1,3 @@
-# Create your models here.
-
 import uuid
 import os
 
@@ -7,9 +5,10 @@ from django.conf import settings
 from django.db import models
 from django.contrib.auth.models import (
     AbstractBaseUser,
-    BaseUserManager,
     PermissionsMixin,
 )
+
+from django.contrib.auth import get_user_model
 
 def user_image_file_path(instance, filename):
     """Generate file path for new user image."""
@@ -73,6 +72,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     branch = models.CharField(max_length=255, null=True)
     image = models.ImageField(null=True, upload_to=user_image_file_path)
     managers = models.ManyToManyField('self', symmetrical=False, related_name='managed_by', blank=True)
+    is_technique = models.BooleanField(default=False)
     is_creator = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
@@ -96,14 +96,47 @@ class User(AbstractBaseUser, PermissionsMixin):
         if self.is_creator:
             self.managers.add(manager)
             self.save()
+    
+    @property
+    def average_rating(self):
+        if self.is_technique:
+            return self.ratings_received.aggregate(models.Avg('rating'))['rating__avg']
+        return None
 
     def create_manager(self, email, first_name, last_name, branch, password=None, **extra_fields):
         """Create a manager and assign them to the current user (owner)."""
         if self.is_creator:
-            manager = User.objects.create_user(email, first_name, last_name, branch, password, **extra_fields)
+            manager = User.objects.create_user(email, 
+                                               first_name, 
+                                               last_name, 
+                                               branch, 
+                                               password, 
+                                               company=self.company, 
+                                               **extra_fields)
             self.assign_manager(manager)
             return manager
         return None
+
+class Rating(models.Model):
+    technician = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="ratings_received",
+        limit_choices_to={'is_technique': True},
+    )
+    creator = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="ratings_given",
+        limit_choices_to={'is_creator': True},
+    )
+    rating = models.PositiveSmallIntegerField()  # Calificación entre 1 y 5, por ejemplo
+    comment = models.TextField(blank=True, null=True)
+    created = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Rating {self.rating} for {self.technician.get_full_name()} by {self.creator.get_full_name()}"
+
 
 class Register(models.Model):
     pest_name = models.CharField(max_length=255)
@@ -113,3 +146,19 @@ class Register(models.Model):
 
     def __str__(self):
         return f"{self.pest_name} ({self.owner.get_full_name()})"
+    
+class WorkRequest(models.Model):
+    STATUS_CHOICES = [
+        ('send', 'Send'),
+        ('submitted', 'Submitted'),
+        ('working', 'Working'),
+    ]
+
+    owner = models.ForeignKey(get_user_model(), on_delete=models.CASCADE, related_name="sent_requests")
+    technician = models.ForeignKey(get_user_model(), on_delete=models.CASCADE, related_name="received_requests")
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='submitted')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Request from {self.owner.get_full_name()} to {self.technician.get_full_name()} - Status: {self.status}"
